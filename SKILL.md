@@ -45,6 +45,10 @@ Both directions work:
   Deleting the source (or its rollout files) orphans the copy's older turns.
 - Renaming the copy is normal (`--suffix`, default ` · <provider> copy`) so the two
   threads are distinguishable in the app sidebar; `--no-rename` keeps the old name.
+- A fresh fork owns no items of its own, so the app would hide it: the desktop list is
+  `... WHERE archived = 0 AND threads.preview <> ''`. The tool therefore seeds
+  `name` / `title` / `preview` on the new row (from the source thread) and prints a
+  `listable :` line. Restart the app if its sidebar still looks stale.
 - `undo` refuses to delete a thread that has no `forked_from_id` — it only removes
   copies, never originals.
 
@@ -57,7 +61,10 @@ Both directions work:
 3. `thread/fork` with `{threadId, modelProvider, model?, cwd?, excludeTurns: true, threadSource: "user"}`.
    `excludeTurns` keeps the response small (metadata + live fork state only).
 4. `thread/name/set` to name the copy.
-5. `verify` compares the newest `turn` id of source and copy via `thread/turns/list`
+5. Seed `threads.name/title/preview` in the state DB (`make_listable`) — required for the
+   desktop app's sidebar, which filters on `preview <> ''` and reads the DB only
+   (`useStateDbOnly: true`). Purely cosmetic for the CLI: `codex resume <id>` works either way.
+6. `verify` compares the newest `turn` id of source and copy via `thread/turns/list`
    (`sortDirection: "desc"`, `limit: 1`) — equal ids prove the history chain resolves.
 
 Useful protocol facts:
@@ -87,7 +94,9 @@ the shell or set it for the run. `--force` skips this guard.
 
 - `thread/fork` hangs on a huge thread: raise `--wait` (seconds per RPC, default 60).
 - Copy opens but the model errors: re-fork with an explicit `--model`.
-- Copy looks empty in the sidebar but `verify` passes: the app hides forked/segmented
-  threads from `thread/list`; open it by name or `codex resume <id>`.
+- Copy exists (`codex resume <id>` works) but the app sidebar does not show it: the app
+  lists only rows with a non-empty `preview`; re-run the fork (it seeds the field) or set
+  `threads.preview` yourself, then restart the app. Fork threads are never listed while
+  their `preview` is empty, regardless of `forked_from_id`.
 - `.jsonl.zst` rollouts are supported (`list`/`verify` transparently use the `.zst`
   sibling when the plain `.jsonl` is absent).

@@ -392,6 +392,32 @@ def backup_state_db(db: Path, home: Path) -> Path:
     return dst
 
 
+def make_listable(db: Path, thread_id: str, name: str | None, preview: str | None) -> str | None:
+    """Make a fresh fork show up in the desktop app's sidebar.
+
+    The app's thread list is `SELECT ... WHERE archived = 0 AND threads.preview <> ''`
+    (state/src/runtime/threads.rs), queried with `useStateDbOnly: true`. A new fork owns no
+    items of its own, so its `preview` is empty and the row is filtered out even though the
+    thread exists and its history is inherited. Seeding name/title/preview from the source
+    thread makes it visible without touching the fork's history or rollout.
+    """
+    con = sqlite3.connect(db, timeout=15)
+    try:
+        row = con.execute("select name, title, preview from threads where id=?", (thread_id,)).fetchone()
+        if not row:
+            return None
+        cur_name, cur_title, cur_preview = row
+        final_name = (name or cur_name or cur_title or preview or "").strip() or "Codex fork"
+        final_title = (cur_title or final_name).strip()
+        final_preview = (cur_preview or preview or final_name).strip()
+        con.execute("update threads set name=?, title=?, preview=? where id=?",
+                    (final_name, final_title, final_preview, thread_id))
+        con.commit()
+        return final_name
+    finally:
+        con.close()
+
+
 def cmd_fork(args) -> int:
     home = codex_home()
     db = find_state_db(home)
@@ -495,6 +521,14 @@ def cmd_fork(args) -> int:
             except SystemExit as exc:
                 print(f"! rename skipped: {exc}")
 
+        # Without this the copy exists but stays invisible in the desktop app's sidebar.
+        try:
+            shown = make_listable(db, new_id, new_name,
+                                  src["preview"] or src["title"] or src["name"])
+            print(f"listable     : {shown!r} (name/title/preview seeded for the app sidebar)")
+        except Exception as exc:  # advisory: never fail the fork over cosmetics
+            print(f"! could not seed sidebar fields: {exc}")
+
         if args.verify:
             ok = verify_thread(server, source_id, new_id, args.wait)
             if not ok:
@@ -510,7 +544,8 @@ def cmd_fork(args) -> int:
 
     print("\ndone. The original thread is untouched.")
     print(f"  open the copy : codex resume {new_id}")
-    print(f"  or in the app : search for {new_name!r}" if renamed else "")
+    if renamed:
+        print(f"  in the app    : look for {new_name!r} (restart the app if the sidebar is stale)")
     print("  history is inherited by reference (same as Codex's own fork):"
           " keep the source thread around.")
     return 0

@@ -69,6 +69,20 @@ Options worth knowing:
 
 Runs in ~3 seconds even for a thread with 89 turns and 470 MB of rollout history.
 
+### Making the copy show up in the desktop app
+
+A fresh fork owns no items of its own, so its `threads.preview` column is empty — and the
+desktop app's thread list is literally `WHERE archived = 0 AND threads.preview <> ''`
+(queried with `useStateDbOnly: true`). Such a thread exists and resumes fine from the CLI,
+but the sidebar silently hides it. So after forking, the tool seeds `name` / `title` /
+`preview` on the **new** row (taking the source thread's values) and prints:
+
+```
+listable     : 'my thread · sharellm copy' (name/title/preview seeded for the app sidebar)
+```
+
+Restart the desktop app if its sidebar still looks stale (the list is fetched once per window).
+
 ## Use as an agent skill
 
 `SKILL.md` is written for agent harnesses (Codex, Claude-style skill directories, DSH).
@@ -98,6 +112,8 @@ python scripts/codex_fork_provider.py undo --thread <副本id>     # 删除副�
 ## Safety
 
 - Only calls `thread/fork`, `thread/name/set`, `thread/turns/list`, `thread/delete`.
+- The only SQL write touches the **new** row (`threads.name/title/preview`, cosmetic, so the
+  desktop app lists it). The source row is read-only.
 - Never writes to the source thread — no DB updates, no rollout edits.
 - `undo` refuses any thread without `forked_from_id` (i.e. never an original).
 - `state_*.sqlite` is backed up to `<codex_home>/fork_backups/<timestamp>/` before each fork.
